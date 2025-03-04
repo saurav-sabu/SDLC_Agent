@@ -77,8 +77,8 @@ if st.button("Generate User Stories"):
         result = graph.invoke(initial_state)
 
         # Display Output
-        st.subheader("📌 Generated User Stories")
-        st.write(result["messages"][1].content)
+        with st.expander("📌 Generated User Stories", expanded=True):
+            st.write(result["messages"][1].content)
 
     else:
         st.error("⚠️ Please provide all inputs before generating user stories.")
