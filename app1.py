@@ -5,6 +5,9 @@ from pydantic import BaseModel, Field
 from typing import List, Literal, Optional, TypedDict, Annotated
 from langgraph.graph.message import add_messages
 from langchain_core.messages import SystemMessage, HumanMessage
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # Initialize OpenAI LLM
 llm = ChatOpenAI(model="gpt-4o")
