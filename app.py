@@ -98,6 +98,34 @@ def initialize_state():
         st.session_state.generated_code = ""
     if "code_files" not in st.session_state:
         st.session_state.code_files = {}
+    if "code_quality_score" not in st.session_state:
+        st.session_state.code_quality_score = ""
+    if "code_feedback" not in st.session_state:
+        st.session_state.code_feedback = ""
+    if "fixed_code_after_code_review" not in st.session_state:
+        st.session_state.fixed_code_after_code_review = ""
+    if "fixed_code_after_security" not in st.session_state:
+        st.session_state.fixed_code_after_security = ""
+    if "fixed_code_after_qa_feedback" not in st.session_state:
+        st.session_state.fixed_code_after_qa_feedback = ""
+    if "fixed_test_cases_after_review" not in st.session_state:
+        st.session_state.fixed_test_cases_after_review = ""
+    if "security_feedback" not in st.session_state:
+        st.session_state.security_feedback = ""
+    if "security_decision" not in st.session_state:
+        st.session_state.security_decision = ""
+    if "test_cases_feedback" not in st.session_state:
+        st.session_state.test_cases_feedback = ""
+    if "test_cases_decision" not in st.session_state:
+        st.session_state.test_cases_decision = ""
+    if "test_cases_response" not in st.session_state:
+        st.session_state.test_cases_response = ""
+    if "qa_testing_feedback" not in st.session_state:
+        st.session_state.qa_testing_feedback = ""
+    if "qa_testing_decision" not in st.session_state:
+        st.session_state.qa_testing_decision = ""
+    if "write_test_cases_response" not in st.session_state:
+        st.session_state.write_test_cases_response = ""
     
     if "workflow_complete" not in st.session_state:
         st.session_state.workflow_complete = False
@@ -194,6 +222,7 @@ class State (TypedDict):
   test_cases_decision:str
   test_cases_feedback:str
   test_cases_response:str
+  write_test_cases_response: str
   qa_testing_decision:str
   qa_testing_feedback:str
 
@@ -207,7 +236,33 @@ class ProductOwnerRoute(BaseModel):
 # Define the structured output for design routing
 class DesignRoute(BaseModel):
     step: Literal["Approved", "Feedback"] = Field(description="The next step in routing process")
-    feedback: str = Field(description="If the design documents are not good, provide feedback on how to improve them.")
+    feedback: str = Field(description='If the design documents are not good, provide feedback on how to improve them. If good, leave "".')
+
+class CodeReviewRoute(BaseModel):
+    step: Literal["Approved", "Feedback"] = Field(
+        description="The next step in routing process after code review"
+    )
+    feedback: str = Field(
+        description="If the code is not approved, provide feedback on how to improve it."
+    )
+
+class SecurityReviewRoute(BaseModel):
+    step: Literal["Approved", "Feedback"] = Field(
+        description="The next step in routing process after security review"
+    )
+    feedback: str = Field(
+        description="If security issues are found, provide feedback on how to fix them."
+    )
+
+class TestCasesReviewRoute(BaseModel):
+    step: Literal["Approved", "Feedback"] = Field(
+        description="The next step in routing process after test cases review"
+    )
+    feedback: str = Field(
+        description="If the test cases are not approved, provide feedback on how to improve them."
+    )
+
+
 
 
 def create_langgraph_workflow(api_key):
@@ -220,7 +275,9 @@ def create_langgraph_workflow(api_key):
     llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash")
     router_product_owner_route = llm.with_structured_output(ProductOwnerRoute)
     router_design_route = llm.with_structured_output(DesignRoute)
-  
+    router_code_review_route = llm.with_structured_output(CodeReviewRoute)
+    router_security_review_route = llm.with_structured_output(SecurityReviewRoute)
+    router_test_cases_review_route = llm.with_structured_output(TestCasesReviewRoute)
 
 
     # Node Functions
@@ -567,29 +624,28 @@ def create_langgraph_workflow(api_key):
 **Note:** This document serves as a **single source of truth** for both functional and technical teams. It ensures that business requirements are accurately translated into technical implementations.
 """
         combine_message = llm.invoke([improved_combine_doc] + state["messages"])
-        print(combine_message)
         st.session_state.combined_documentation = combine_message.content
         return {"messages":combine_message.content,"combined_documentation": combine_message.content}
 
     
     def design_review(state: State):
         st.session_state.current_step = "Design Review"
-        
         """Routes the user stories for approval or revision."""
         message_content = state["combined_documentation"]  # Extract content from last message
         decision = router_design_route.invoke(
             [
                 SystemMessage(content="""Route the input to Approved or Feedback based on technical and functional document quality.
-                If 'Approved', leave feedback empty or provide positive reinforcement.
+                If 'Approved', leave feedback as "" or provide positive reinforcement.
                 If 'Feedback', provide constructive feedback on how to improve the technical and functional document quality."""),
                 HumanMessage(content=message_content),
             ]
         )
         
         # Store in session state for UI
+        
         st.session_state.design_feedback = decision.feedback
         
-        return {"design_decision": decision.step, "feedback": decision.feedback}
+        return {"design_decision": decision.step, "feedback_design": decision.feedback}
     
     def route_design_decision(state: State):
         """Routes the workflow based on product owner decision."""
@@ -597,6 +653,174 @@ def create_langgraph_workflow(api_key):
             return "Feedback"
         else:  # "Approved"
             return "Approved"
+        
+    def code_review(state:State):
+        st.session_state.current_step = "Code Review"
+        """Routes the user stories for approval or revision."""
+        message_content = state["generated_code"]  # Extract content from last message
+        # Use router_code_review_route instead of CodeReviewRoute
+        decision = router_code_review_route.invoke(
+                [
+                    SystemMessage(content="""Route the code to Approved or Feedback based on quality.
+                    If 'Approved', you can still provide minor suggestions for improvement.
+                    If 'Feedback', provide detailed feedback on critical issues that must be fixed."""),
+                    HumanMessage(content=message_content)
+                ]
+            )
+
+        print(f"Decision Step: {decision.step}")
+        print(f"Feedback: {decision.feedback}")
+        return {"code_decision": decision.step, "code_feedback": decision.feedback}
+    
+    def route_code_review_decision(state: State):
+        """Routes the workflow based on code review decision."""
+        if state["code_decision"] == "Feedback":
+            return "Feedback"
+        else:  # "Approved"
+            return "Approved"  # Move to the next step in your workflow
+        
+    
+    def security_review(state:State):
+        st.session_state.current_step = "Security Review"
+        """Routes the user stories for approval or revision."""
+        message_content = state["generated_code"]  # Extract content from last message
+        # Use router_code_review_route instead of CodeReviewRoute
+        decision = router_security_review_route.invoke(
+                [
+                    SystemMessage(content="""Route the code to Approved or Feedback based on security issues.
+                    If 'Approved', you can still provide minor suggestions for improvement.
+                    If 'Feedback', provide detailed feedback on critical security issues that must be fixed."""),
+                    HumanMessage(content=message_content)
+                ]
+            )
+
+        print(f"Decision Step: {decision.step}")
+        print(f"Feedback: {decision.feedback}")
+        st.session_state.security_feedback = decision.feedback
+        return {"security_decision": decision.step, "security_feedback": decision.feedback}
+    
+
+    def route_security_review_decision(state: State):
+        """Routes the workflow based on security review decision."""
+        if state["security_decision"] == "Feedback":
+            return "Feedback"
+        else:  # "Approved"
+            return "Approved"  # Move to the next step in your workflow
+        
+    def test_cases_review(state: State):
+        st.session_state.current_step = "Test Cases Review"
+        """Reviews test cases for approval or revision."""
+        # Construct a prompt to review the test cases
+        test_review_prompt = f"""
+        You are an expert QA reviewer tasked with evaluating test cases for completeness and quality.
+
+        **Project Name**: {state["project_name"]}
+        **Project Description**: {state["project_description"]}
+
+        **Code Being Tested**:
+        {state["generated_code"]}
+
+        **Test Cases to Evaluate**:
+        {state["write_test_cases_response"]}
+
+        **Review Criteria**:
+        - Test coverage: do the tests cover all functions, modules, and features?
+        - Edge cases: are boundary conditions and exceptional scenarios tested?
+        - Test clarity: are the tests clearly written and well-documented?
+        - Maintainability: can the tests be easily maintained as the code evolves?
+        - Integration testing: are component interactions properly tested?
+        - Error handling: are exception paths and error conditions tested?
+
+        Evaluate if these test cases meet quality standards for production code.
+        """
+
+        # Use the structured output router
+        decision = router_test_cases_review_route.invoke(
+            [
+                SystemMessage(content="""Review the test cases and determine if they provide adequate coverage.
+                If coverage is below 80% or missing critical test scenarios, the decision must be 'Feedback'."""),
+                HumanMessage(content=test_review_prompt),
+            ]
+        )
+        print(f"Decision Step: {decision.step}")
+        print(f"Feedback: {decision.feedback}")
+        st.session_state.test_cases_feedback = decision.feedback
+        return {"test_cases_decision": decision.step, "test_cases_feedback": decision.feedback}
+
+    def route_test_cases_decision(state: State):
+        """Routes the workflow based on test cases decision."""
+        if state["test_cases_decision"] == "Feedback":
+            return "Feedback"
+        else:  # "Approved"
+            return "Approved"
+        
+    def qa_testing(state: State):
+        st.session_state.current_step = "QA Testing"
+        """Performs QA testing on the code and determines if it passes or fails."""
+        qa_testing_prompt = f"""
+        You are an expert QA tester tasked with executing test cases and reporting results.
+
+        **Project Name**: {state["project_name"]}
+        **Project Description**: {state["project_description"]}
+
+        **Code to Test**:
+        {state["generated_code"]}
+
+        **Test Cases**:
+        {state["test_cases_response"]}
+
+        **Testing Criteria**:
+        - Functionality: Does the code perform as expected?
+        - Reliability: Does it handle edge cases and errors gracefully?
+        - Performance: Does it meet performance expectations?
+        - Usability: Is the API/interface intuitive and consistent?
+        - Security: Does it maintain security standards?
+
+        **Testing Process**:
+        1. Execute each test case
+        2. Document the results (pass/fail)
+        3. Record any unexpected behaviors or errors
+        4. Measure performance metrics where applicable
+        5. Provide an overall assessment
+
+        Based on the code and test cases, simulate a thorough QA testing process and report your findings.
+        """
+
+        class QATestingResult(BaseModel):
+            decision: Literal["Passed", "Failed"] = Field(
+                description="Final testing decision - Passed or Failed"
+            )
+            feedback: str = Field(
+                description="Detailed feedback including test results, issues found, and recommendations for improvement"
+            )
+
+        router_qa_testing = llm.with_structured_output(QATestingResult)
+
+        test_results = router_qa_testing.invoke(
+            [
+                SystemMessage(content="""Execute a thorough QA testing simulation and provide detailed results.
+                If any critical tests fail or if overall pass rate is below 90%, the decision must be 'Failed'."""),
+                HumanMessage(content=qa_testing_prompt),
+            ]
+        )
+
+        print(f"QA Testing Decision: {test_results.decision}")
+        print(f"QA Testing Feedback: {test_results.feedback}")
+
+        st.session_state.qa_testing_feedback = test_results.feedback
+
+        return {
+            "qa_testing_decision": test_results.decision,
+            "qa_testing_feedback": test_results.feedback
+        }
+
+    def route_qa_testing_decision(state: State):
+        """Routes the workflow based on QA testing results."""
+        if state["qa_testing_decision"] == "Failed":
+            return "Failed"
+        else:  # "Passed"
+            return "Passed"
+
     
     def generate_code_from_documentation(state: State):
         st.session_state.current_step = "Generating Code"
@@ -675,6 +899,8 @@ You are a highly skilled **software engineer** specializing in **building scalab
         code_response = llm.invoke([code_generation_prompt] + state["messages"])
 
         generated_code = code_response.content  # Store the generated code separately
+
+        print(generated_code)
         
         # Parse code files and store in session state
         code_files = parse_code_blocks(generated_code)
@@ -684,6 +910,201 @@ You are a highly skilled **software engineer** specializing in **building scalab
 
         return {"messages": code_response.content, "generated_code": code_response.content}
     
+    def fix_code_after_code_review(state:State):
+        st.session_state.current_step = "Fix Code After Code Review"
+        code_review_prompt = f"""
+        🔍 **Comprehensive Code Review Request** 🔍
+
+        You are an **expert software engineer and code reviewer** with deep expertise in **clean code, performance optimization, and security best practices**.
+        Your task is to **critically evaluate** the following code and provide **a detailed, structured review**.
+
+        ---
+
+        ## **📌 Project Overview**
+        - **Project Name**: {state["project_name"]}
+        - **Project Description**: {state["project_description"]}
+
+        ---
+
+        ## **📖 Generated Code for Review**
+        {state["generated_code"]}
+
+        ## **Feedback for code**
+        {state.get("code_feedback", "")}
+
+        ---
+
+        ## **🛠️ Code Review Guidelines**
+        Please review the code against the following **critical areas** and provide detailed feedback:
+
+        ### ✅ **1. Code Quality & Readability**
+        - Is the code **clean, well-structured, and modular**?
+        - Are **function and variable names** meaningful and self-explanatory?
+        - Are there **sufficient comments and docstrings** where needed?
+
+        ### 🐛 **2. Bug Detection & Logic Errors**
+        - Identify any **logical errors or unexpected behaviors**.
+        - Check for **incorrect assumptions, undefined variables, or faulty conditions**.
+
+        ### 🔒 **3. Security Best Practices**
+        - Are there **potential security vulnerabilities** (e.g., SQL injection, XSS, CSRF, etc.)?
+        - Is **authentication & authorization** implemented securely?
+        - Are **sensitive data handling & encryption** properly managed?
+
+        ### 🚀 **4. Performance & Optimization**
+        - Are there any **performance bottlenecks**?
+        - Can the code be optimized using **better algorithms or data structures**?
+        - Are there **unnecessary computations, redundant loops, or excessive database calls**?
+
+        ### 📏 **5. Adherence to Best Practices**
+        - Does the code follow **industry-standard coding conventions** (PEP8 for Python, Airbnb for JavaScript, etc.)?
+        - Is there proper **error handling & exception management**?
+        - Are dependencies and third-party libraries **used efficiently**?
+
+        ### ⚙ **6. Feature Implementation & Completeness**
+        - Does the code **fully implement all required features** as per the documentation?
+        - Are **all functionalities covered**, or are there any missing elements?
+
+        ---
+
+        ## **📌 Expected Output**
+        Provide a **structured review** with the following details:
+        1.  **List of identified issues** categorized by severity (Critical, Major, Minor).
+        2. **Suggested improvements** for each issue.
+        3. **Approval Status**:
+        - ✅ **Approved**: If the code is production-ready.
+        - 📝 **Needs Revisions**: If improvements are necessary before approval.
+
+        🚀 **Your insights will help ensure high-quality, secure, and maintainable software.**
+        """
+
+        code_review_response = llm.invoke([code_review_prompt] + state["messages"])
+        st.session_state.code_feedback = code_review_response.content
+        print(code_review_response.content)
+        return {"messages":code_review_response.content,"code_quality_score":code_review_response.content}
+    
+
+    def fix_code_after_security(state: State):
+        st.session_state.current_step = "Fix Code After Security Review"
+        """Fixes the code based on security review feedback."""
+        fix_security_prompt = f"""
+        You are an expert security engineer tasked with fixing security vulnerabilities in code.
+
+        **Project Name**: {state["project_name"]}
+        **Project Description**: {state["project_description"]}
+
+        **Original Code**:
+        {state["generated_code"]}
+
+        **Security Issues**:
+        {state["security_feedback"]}
+
+        **Your Task**:
+        - Address all security vulnerabilities identified in the review
+        - Implement secure coding practices
+        - Add comments explaining the security fixes
+        - Ensure the code remains functional while improving security
+
+        Provide the improved code with clear explanations of the security fixes applied.
+        """
+        fix_security_response = llm.invoke([fix_security_prompt] + state["messages"])
+        st.session_state.generated_code = fix_security_response.content
+        return {"messages":fix_security_response.content,"generated_code":fix_security_response.content}
+
+
+    def write_test_cases(state: State):
+        st.session_state.current_step = "Write Test Cases"
+        """Generates comprehensive test cases for the code."""
+        test_cases_prompt = f"""
+        You are an expert QA engineer specializing in test case development.
+
+        Create comprehensive test cases for the following code:
+
+        **Project Name**: {state["project_name"]}
+        **Project Description**: {state["project_description"]}
+
+        **Code to Test**:
+        {state["generated_code"]}
+
+        **Test Requirements**:
+        - Create unit tests for all individual functions/methods
+        - Include integration tests for component interactions
+        - Add edge case and boundary testing
+        - Implement tests for error conditions and exception handling
+        - Include both positive and negative test scenarios
+        - Consider performance testing where appropriate
+        - Write clear test descriptions and expected results
+
+        Please provide test cases in an appropriate testing framework based on the code language.
+        """
+
+        write_test_cases_response = llm.invoke([test_cases_prompt] + state["messages"])
+        st.session_state.write_test_cases_response = write_test_cases_response.content
+        return {"messages": write_test_cases_response.content, "write_test_cases_response": write_test_cases_response.content}
+
+
+    def fix_test_cases_after_review(state: State):
+        st.session_state.current_step = "Fix Test Cases After Review"
+        """Fixes test cases based on review feedback."""
+        fix_test_cases_prompt = f"""
+        You are an expert QA engineer tasked with improving test cases based on review feedback.
+
+        **Project Name**: {state["project_name"]}
+        **Project Description**: {state["project_description"]}
+
+        **Code Being Tested**:
+        {state["generated_code"]}
+
+        **Original Test Cases**:
+        {state["write_test_cases_response"]}
+
+        **Review Feedback**:
+        {state["test_cases_feedback"]}
+
+        **Your Task**:
+        - Address all issues identified in the review feedback
+        - Improve test coverage where gaps were identified
+        - Add missing edge cases and error condition tests
+        - Enhance test clarity and documentation
+        - Ensure all tests follow best practices for the language/framework
+
+        Please provide the improved test cases with clear explanations of the changes made.
+        """
+
+        fix_test_cases_response = llm.invoke([fix_test_cases_prompt] + state["messages"])
+        st.session_state.test_cases_response = fix_test_cases_response.content
+        return {"messages": fix_test_cases_response.content, "test_cases_response": fix_test_cases_response.content}
+
+
+    def fix_code_after_qa_feedback(state: State):
+        st.session_state.current_step = "Fix Code After QA Feedback"
+        """Fixes code based on QA testing feedback."""
+        qa_fix_prompt = f"""
+        You are an expert software engineer tasked with fixing issues identified during QA testing.
+
+        **Project Name**: {state["project_name"]}
+        **Project Description**: {state["project_description"]}
+
+        **Original Code**:
+        {state["generated_code"]}
+
+        **QA Testing Feedback**:
+        {state["qa_testing_feedback"]}
+
+        **Your Task**:
+        - Address all issues identified during QA testing
+        - Fix functionality that didn't work as expected
+        - Improve error handling for failed test cases
+        - Optimize code where performance issues were noted
+        - Ensure the code passes all test cases
+
+        Provide the improved code with clear comments explaining the changes made to address the QA feedback.
+        """
+
+        fix_qa_response = llm.invoke([qa_fix_prompt] + state["messages"])
+        st.session_state.generated_code = fix_qa_response.content
+        return {"messages": fix_qa_response.content, "generated_code": fix_qa_response.content}
+                
     
     # Create the graph
     builder = StateGraph(State)
@@ -697,6 +1118,15 @@ You are a highly skilled **software engineer** specializing in **building scalab
     builder.add_node("Generate Combined Documentation", generate_combined_documentation)
     builder.add_node("Design Review", design_review)
     builder.add_node("Generate Code", generate_code_from_documentation)
+    builder.add_node("Code Review",code_review)
+    builder.add_node("Fix Code After Code Review", fix_code_after_code_review)
+    builder.add_node("Security Review",security_review)
+    builder.add_node("Fix Code After Security Review", fix_code_after_security)
+    builder.add_node("Write Test Cases", write_test_cases)
+    builder.add_node("Test Cases Review", test_cases_review)
+    builder.add_node("Fix Test Cases After Review", fix_test_cases_after_review)
+    builder.add_node("QA Testing", qa_testing)
+    builder.add_node("Fix Code After QA", fix_code_after_qa_feedback)
 
     # Add edges
     builder.add_edge(START, "Auto Generate User Stories")
@@ -727,7 +1157,57 @@ You are a highly skilled **software engineer** specializing in **building scalab
         }
     )
 
-    builder.add_edge("Generate Code", END)
+    builder.add_edge("Generate Code", "Code Review")
+
+    builder.add_conditional_edges(
+        "Code Review",
+        route_code_review_decision,
+        {
+            "Approved": "Security Review",
+            "Feedback": "Fix Code After Code Review"
+        }
+    )
+
+    builder.add_edge("Fix Code After Code Review", "Generate Code")
+
+
+    builder.add_conditional_edges(
+        "Security Review",
+        route_security_review_decision,
+        {
+            "Approved": "Write Test Cases",
+            "Feedback": "Fix Code After Security Review"
+        }
+    )
+
+    builder.add_edge("Fix Code After Security Review", "Security Review")
+    builder.add_edge("Write Test Cases", "Test Cases Review")
+
+    builder.add_conditional_edges(
+        "Test Cases Review",
+        route_test_cases_decision,
+        {
+            "Approved": "QA Testing",
+            "Feedback": "Fix Test Cases After Review"
+        }
+    )
+
+    builder.add_edge("Fix Test Cases After Review", "Write Test Cases")
+
+
+
+    # Then add the conditional edges for QA testing
+    builder.add_conditional_edges(
+        "QA Testing",
+        route_qa_testing_decision,
+        {
+            "Passed": END,  # If QA passes, end the workflow
+            "Failed": "Fix Code After QA"  # If QA fails, go to fix code
+        }
+    )
+
+
+    builder.add_edge("Fix Code After QA", "Generate Code")
 
     graph = builder.compile()
     return graph
@@ -745,7 +1225,16 @@ def display_progress_tracker():
         "Generate Functional Documentation",
         "Generate Combined Documentation",
         "Design Review",
-        "Generate Code"
+        "Generate Code",
+        "Code Review",
+        "Fix Code After Code Review",
+        "Security Review",
+        "Fix Code After Security Review",
+        "Write Test Cases",
+        "Test Cases Review",
+        "Fix Test Cases After Review",
+        "QA Testing",
+        "Fix Code After QA Feedback"
     ]
     
     current_step = st.session_state.current_step
@@ -811,7 +1300,7 @@ def main():
                 }
                 
                 # Run the workflow
-                for event in workflow.stream(inputs):
+                for event in workflow.stream(inputs,config={"recursion_limit": 50}):
                     # Debug output if needed
                     # st.write(event)
                     pass
@@ -821,7 +1310,7 @@ def main():
                 
         # Display results in tabs
         if st.session_state.user_stories:
-            tabs = st.tabs(["User Stories", "Documentation", "Generated Code"])
+            tabs = st.tabs(["User Stories", "Documentation", "Generated Code","Fix Code After Code Review","Fix Code After Security","Fix Test Cases After Review","Fix Code After QA Feedback"])
             
             # User Stories Tab
             with tabs[0]:
@@ -854,6 +1343,7 @@ def main():
                 
                 if st.session_state.technical_documentation:
                     with st.expander("📊 Technical Documentation", expanded=True):
+                        print(st.session_state.technical_documentation)
                         st.markdown(st.session_state.technical_documentation)
                         create_download_link(
                             st.session_state.technical_documentation,
@@ -863,6 +1353,7 @@ def main():
                 
                 if st.session_state.functional_documentation:
                     with st.expander("📋 Functional Documentation", expanded=True):
+                        print(st.session_state.functional_documentation)
                         st.markdown(st.session_state.functional_documentation)
                         create_download_link(
                             st.session_state.functional_documentation,
@@ -924,6 +1415,82 @@ def main():
                         "generated_code.md",
                         "Download Generated Code"
                     )
+
+            # Fix Code After Code Review Tab
+            with tabs[3]:
+                st.header("Fix Code After Code Review")
+
+                if st.session_state.code_feedback:
+                    with st.expander("Code Review Feedback", expanded=True):
+                        st.info(st.session_state.code_feedback)
+                
+                if st.session_state.generated_code:
+                    with st.expander("Fixed Code After Review", expanded=True):
+                        st.code(st.session_state.generated_code)
+                        create_download_link(
+                            st.session_state.fixed_code_after_code_review,
+                            "fixed_code_after_review.py",
+                            "Download Fixed Code"
+                        )
+
+            # Fix Code After Security Review Tab
+            with tabs[4]:
+                st.header("Fix Code After Security Review")
+                
+                if st.session_state.security_feedback:
+                    with st.expander("Security Review Feedback", expanded=True):
+                        st.info(st.session_state.security_feedback)
+                
+                if st.session_state.fixed_code_after_security:
+                    with st.expander("Fixed Code After Security Review", expanded=True):
+                        st.code(st.session_state.fixed_code_after_security)
+                        create_download_link(
+                            st.session_state.fixed_code_after_security,
+                            "fixed_code_after_security.py",
+                            "Download Fixed Code"
+                        )
+
+            # Fix Test Cases After Review Tab
+            with tabs[5]:
+                st.header("Fix Test Cases After Review")
+                
+                if st.session_state.write_test_cases_response:
+                    with st.expander("Test Cases to Review", expanded=True):
+                        st.markdown(st.session_state.write_test_cases_response)
+                
+                
+                if st.session_state.test_cases_response:
+                    with st.expander("Fixed Test Cases After Review", expanded=True):
+                        st.markdown(st.session_state.test_cases_response)
+                        create_download_link(
+                            st.session_state.test_cases_response,
+                            "fixed_test_cases_after_review.md",
+                            "Download Fixed Test Cases"
+                        )
+                
+                if st.session_state.test_cases_feedback:
+                    with st.expander("Test Cases Review Feedback", expanded=True):
+                        st.info(st.session_state.test_cases_feedback)
+        
+            # Fix Code After QA Feedback Tab
+            with tabs[6]:
+                st.header("Fix Code After QA Feedback")
+                
+                if st.session_state.qa_testing_feedback:
+                    with st.expander("QA Testing Feedback", expanded=True):
+                        st.info(st.session_state.qa_testing_feedback)
+                
+                if st.session_state.fixed_code_after_qa_feedback:
+                    with st.expander("Fixed Code After QA Feedback", expanded=True):
+                        st.code(st.session_state.fixed_code_after_qa_feedback)
+                        create_download_link(
+                            st.session_state.fixed_code_after_qa_feedback,
+                            "fixed_code_after_qa.py",
+                            "Download Fixed Code"
+                        )
+
+            
+
 
 
 if __name__ == "__main__":
