@@ -126,6 +126,11 @@ def initialize_state():
         st.session_state.qa_testing_decision = ""
     if "write_test_cases_response" not in st.session_state:
         st.session_state.write_test_cases_response = ""
+    if "qa_final_feedback" not in st.session_state:
+        st.session_state.qa_final_feedback = ""
+    if "security_review_response" not in st.session_state:
+        st.session_state.security_review_response = ""
+
     
     if "workflow_complete" not in st.session_state:
         st.session_state.workflow_complete = False
@@ -225,6 +230,7 @@ class State (TypedDict):
   write_test_cases_response: str
   qa_testing_decision:str
   qa_testing_feedback:str
+  qa_final_feedback:str
 
 
 # Define the structured output for product owner routing
@@ -264,7 +270,6 @@ class TestCasesReviewRoute(BaseModel):
 
 
 
-
 def create_langgraph_workflow(api_key):
     """Create and return the LangGraph workflow."""
     if not api_key:
@@ -280,36 +285,6 @@ def create_langgraph_workflow(api_key):
     router_test_cases_review_route = llm.with_structured_output(TestCasesReviewRoute)
 
 
-    # Node Functions
-    def generate_user_stories(state: State):
-        st.session_state.current_step = "Generating User Stories"
-        user_story_prompt = f"""
-        You are an expert Agile product owner specializing in user story generation. Each user story must:
-        - Clearly define the user role.
-        - Describe the action or feature needed.
-        - Specify the benefit or reason behind the feature.
-        - Include 3-5 well-defined acceptance criteria.
-
-        **Project Details:**
-        - Name: {state["project_name"]}
-        - Description: {state["project_description"]}
-        - Features:
-        {state["features"]}
-
-        Generate at least one user story per feature, following the format:
-        "As a [user role], I want [feature or action] so that [benefit or reason]."
-
-        Ensure clarity, completeness, and Agile best practices.
-        """
-
-        messages = state.get("messages", [])
-        response = llm.invoke([user_story_prompt] + messages)
-        messages.append(response)
-        
-        # Store in session state for UI
-        st.session_state.user_stories = response.content
-
-        return {"messages": messages}
     
     def generate_user_stories(state:State):
         st.session_state.current_step = "Generating User Stories"
@@ -332,8 +307,7 @@ def create_langgraph_workflow(api_key):
 
 
         **Stakeholder Feedback:**
-        {state.get("product_feedback", "")}
-
+        {state.get("final_product_feedback", "")}
 
         **Deliverables:**
         Generate at least one user story per key feature, ensuring:
@@ -342,7 +316,7 @@ def create_langgraph_workflow(api_key):
         - If applicable, include edge cases or dependencies.
         - Suggest any technical constraints or opportunities the development team should be aware of.
         - Add complexity estimation (story points) if appropriate.
-        - If there is any feedback consider it as well
+        - If there is any feedback from stakeholder consider it as well.
 
         Please generate the structured user stories below:
         """
@@ -379,37 +353,34 @@ def create_langgraph_workflow(api_key):
     def revise_user_stories(state:State):
         st.session_state.current_step = "Revising User Stories"
         revise_prompt = f"""
-        You are an expert Agile product owner refining user stories based on specific feedback. Your goal is to transform these stories into production-ready specifications that development teams can implement with minimal clarification needed.
+        You are an expert Agile product owner evaluating and refining user stories based on stakeholder feedback. Your goal is to analyze the provided user stories and suggest general areas for improvement to ensure they are production-ready and align with Agile best practices.
 
-        **Project Context:**
-        - Project Name: {state["project_name"]}
-        - Project Description: {state["project_description"]}
-        - Key Features:
+        ### **Project Context:**
+        - **Project Name:** {state["project_name"]}
+        - **Project Description:** {state["project_description"]}
+        - **Key Features:**  
         {state["features"]}
 
-        **Stakeholder Feedback:**
+        ### **Stakeholder Feedback:**
         {state["product_feedback"]}
 
-        **Original User Stories:**
+        ### **Original User Stories:**
         {state["user_stories"]}
 
-        **Your Task:**
-        Transform these user stories by:
-        1. Ensuring perfect adherence to the format: "As a [specific user role], I want [concrete feature or action] so that [tangible benefit or business value]"
-        2. Providing exactly 3-5 testable acceptance criteria for each story using the Given/When/Then format
-        3. Eliminating all ambiguities and subjective language (e.g., "user-friendly," "intuitive")
-        4. Identifying dependencies between stories and noting them explicitly
-        5. Addressing edge cases and error conditions
-        6. Breaking down stories that are too large into smaller, independently valuable chunks
+### **Your Task:**
+Review the provided user stories and offer **general suggestions for improvement** that can be applied across all stories. Your suggestions should focus on:
 
-        **Expected Output Format:**
-        For each user story, provide:
-        - The refined user story statement
-        - 3-5 acceptance criteria in Given/When/Then format
-        - Dependencies (if applicable)
-        - Story points estimate (if applicable)
+1. **Clarity & Format:** Are the user stories structured in the correct format? Do they clearly define the user role, action, and benefit?  
+2. **Acceptance Criteria:** Are the acceptance criteria well-defined, testable, and following the Given/When/Then format?  
+3. **Ambiguity & Subjectivity:** Are there any vague terms that should be replaced with more precise descriptions?  
+4. **Story Breakdown & Dependencies:** Are any user stories too broad and in need of breaking down? Are dependencies between stories clearly identified?  
+5. **Edge Cases & Error Handling:** Are important error conditions and alternative flows considered?  
+6. **Feasibility & Testability:** Can each story be implemented within a sprint? Is it independently valuable and testable?  
 
-        Return the refined user stories in dictionary format to maintain compatibility with the graph structure.
+### **Expected Output:**  
+Provide **general recommendations** rather than rewriting individual user stories. Your response should highlight common issues, patterns, and best practices that can be applied across all user stories.  
+
+Return your feedback in a **concise and actionable** format, ensuring it is applicable across multiple stories without listing each one separately.
         """
         revised_response = llm.invoke([revise_prompt] + state["messages"])
         st.session_state.revised_user_stories = revised_response.content
@@ -607,22 +578,30 @@ def create_langgraph_workflow(api_key):
         st.session_state.current_step = "Generating Combined Documentation"
         feedback_design = state.get("feedback_design", "")
         improved_combine_doc = f"""
-#   Comprehensive Project Documentation
+# Comprehensive Project Documentation  
 
 **Project Name**: {state["project_name"]}  
-**Project Description**: {state["project_description"]}
+**Project Description**: {state["project_description"]}  
 
-## Functional Documentation
-{state['functional_documentation']}
+## Functional Documentation  
+{state['functional_documentation']}  
 
-## Technical Documentation
-{state['technical_documentation']}
+## Technical Documentation  
+{state['technical_documentation']}  
 
-## Feedback from Design Review
-{feedback_design}
+## Feedback from Design Review  
+{feedback_design}  
 
-**Note:** This document serves as a **single source of truth** for both functional and technical teams. It ensures that business requirements are accurately translated into technical implementations.
+---
+
+### 🔹 **Important Notes:**  
+- This document is formatted in **Markdown** to ensure clarity and readability.  
+- It serves as a **single source of truth** for both functional and technical teams.  
+- The structure ensures business requirements are accurately translated into technical implementations.  
+
+Ensure that the output **strictly follows Markdown syntax** for proper rendering.
 """
+
         combine_message = llm.invoke([improved_combine_doc] + state["messages"])
         st.session_state.combined_documentation = combine_message.content
         return {"messages":combine_message.content,"combined_documentation": combine_message.content}
@@ -717,9 +696,6 @@ def create_langgraph_workflow(api_key):
         **Project Name**: {state["project_name"]}
         **Project Description**: {state["project_description"]}
 
-        **Code Being Tested**:
-        {state["generated_code"]}
-
         **Test Cases to Evaluate**:
         {state["write_test_cases_response"]}
 
@@ -767,7 +743,7 @@ def create_langgraph_workflow(api_key):
         {state["generated_code"]}
 
         **Test Cases**:
-        {state["test_cases_response"]}
+        {state["write_test_cases_response"]}
 
         **Testing Criteria**:
         - Functionality: Does the code perform as expected?
@@ -844,8 +820,11 @@ You are a highly skilled **software engineer** specializing in **building scalab
 ## **Code Feedback**
 {state.get("code_quality_score", "")}
 
+## **Security Review Feedback**
+{state.get("security_review_response", "")}
+
 ## **QA Testing Feedback**
-{state.get("qa_testing_feedback", "")}
+{state.get("qa_final_feedback", "")}
 ---
 
 ## **🛠️ Implementation Guidelines**
@@ -988,55 +967,72 @@ You are a highly skilled **software engineer** specializing in **building scalab
         st.session_state.current_step = "Fix Code After Security Review"
         """Fixes the code based on security review feedback."""
         fix_security_prompt = f"""
-        You are an expert security engineer tasked with fixing security vulnerabilities in code.
+        You are an expert security engineer conducting a security assessment of the provided code.  
 
-        **Project Name**: {state["project_name"]}
-        **Project Description**: {state["project_description"]}
+        ### **Project Context:**  
+        - **Project Name:** {state["project_name"]}  
+        - **Project Description:** {state["project_description"]}  
 
-        **Original Code**:
+        ### **Code Under Review:** 
         {state["generated_code"]}
 
-        **Security Issues**:
-        {state["security_feedback"]}
+        ### **Identified Security Issues:**  
+        {state["security_feedback"]}  
 
-        **Your Task**:
-        - Address all security vulnerabilities identified in the review
-        - Implement secure coding practices
-        - Add comments explaining the security fixes
-        - Ensure the code remains functional while improving security
+    ### **Your Task:**  
+    Analyze the provided code and offer **general security improvement suggestions**, focusing on:  
 
-        Provide the improved code with clear explanations of the security fixes applied.
-        """
+    1. **Vulnerability Assessment:** Confirm whether all identified issues are valid and if any additional risks exist.  
+    2. **Secure Coding Best Practices:** Suggest industry-standard security improvements (e.g., input validation, encryption, least privilege, secure dependencies).  
+    3. **Code Maintainability & Performance:** Ensure security fixes do not introduce unnecessary complexity or performance overhead.  
+    4. **Common Attack Vectors:** Highlight potential risks such as **SQL injection, XSS, CSRF, authentication flaws, and insecure dependencies**.  
+    5. **General Security Guidelines:** Provide recommendations for improving the overall security posture of the project.  
+
+    ### **Expected Output:**  
+    Instead of fixing the code, provide **actionable insights** on improving security. Your response should include:  
+    - **Key areas of concern** in the code.  
+    - **Best practices** for addressing vulnerabilities.  
+    - **General security principles** applicable to the project.  
+
+    Ensure that your recommendations are clear, concise, and follow **secure coding principles**.
+    """
         fix_security_response = llm.invoke([fix_security_prompt] + state["messages"])
-        st.session_state.generated_code = fix_security_response.content
-        return {"messages":fix_security_response.content,"generated_code":fix_security_response.content}
+        st.session_state.security_review_response = fix_security_response.content
+        return {"messages":fix_security_response.content,"security_review_response":fix_security_response.content}
 
 
     def write_test_cases(state: State):
         st.session_state.current_step = "Write Test Cases"
         """Generates comprehensive test cases for the code."""
         test_cases_prompt = f"""
-        You are an expert QA engineer specializing in test case development.
+        You are an expert QA engineer specializing in test case development. Your goal is to generate **comprehensive, high-quality test cases** that ensure full code coverage and reliability.
 
-        Create comprehensive test cases for the following code:
+        ### **Project Context:**  
+        - **Project Name:** {state["project_name"]}  
+        - **Project Description:** {state["project_description"]}  
 
-        **Project Name**: {state["project_name"]}
-        **Project Description**: {state["project_description"]}
-
-        **Code to Test**:
+        ### **Code to Test:** 
         {state["generated_code"]}
 
-        **Test Requirements**:
-        - Create unit tests for all individual functions/methods
-        - Include integration tests for component interactions
-        - Add edge case and boundary testing
-        - Implement tests for error conditions and exception handling
-        - Include both positive and negative test scenarios
-        - Consider performance testing where appropriate
-        - Write clear test descriptions and expected results
+        ### **Existing Test Feedback (if available):**  
+        {state.get("test_cases_response", "")}  
 
-        Please provide test cases in an appropriate testing framework based on the code language.
-        """
+        ### **Test Case Requirements:**  
+        1. **Unit Tests:** Cover all individual functions/methods with **clear assertions**.  
+        2. **Integration Tests:** Validate interactions between components and dependencies.  
+        3. **Edge Cases & Boundary Testing:** Include tests for extreme input values and uncommon scenarios.  
+        4. **Error Handling & Exception Tests:** Ensure failures and incorrect inputs are managed properly.  
+        5. **Positive & Negative Scenarios:** Cover both expected and unexpected behaviors.  
+        6. **Performance Considerations:** If applicable, suggest test cases to assess efficiency and scalability.  
+        7. **Clarity & Documentation:** Write **clear test descriptions**, expected results, and organize tests logically.  
+
+        ### **Additional Considerations:**  
+        - If feedback exists, incorporate necessary improvements in new test cases.  
+        - Ensure best practices are followed for the relevant testing framework and language.  
+        - Suggest improvements to **test structure, maintainability, and execution efficiency**.  
+
+        Please provide **structured test cases** in the most appropriate testing framework based on the code language.
+"""
 
         write_test_cases_response = llm.invoke([test_cases_prompt] + state["messages"])
         st.session_state.write_test_cases_response = write_test_cases_response.content
@@ -1047,28 +1043,35 @@ You are a highly skilled **software engineer** specializing in **building scalab
         st.session_state.current_step = "Fix Test Cases After Review"
         """Fixes test cases based on review feedback."""
         fix_test_cases_prompt = f"""
-        You are an expert QA engineer tasked with improving test cases based on review feedback.
+        You are an expert QA engineer conducting a review of test cases to improve their effectiveness and alignment with best practices.
 
-        **Project Name**: {state["project_name"]}
-        **Project Description**: {state["project_description"]}
+        ### **Project Context:**  
+        - **Project Name:** {state["project_name"]}  
+        - **Project Description:** {state["project_description"]}  
 
-        **Code Being Tested**:
-        {state["generated_code"]}
-
-        **Original Test Cases**:
+        ### **Original Test Cases:**  
         {state["write_test_cases_response"]}
 
-        **Review Feedback**:
-        {state["test_cases_feedback"]}
+        ### **Review Feedback:**  
+        {state["test_cases_feedback"]}  
 
-        **Your Task**:
-        - Address all issues identified in the review feedback
-        - Improve test coverage where gaps were identified
-        - Add missing edge cases and error condition tests
-        - Enhance test clarity and documentation
-        - Ensure all tests follow best practices for the language/framework
+        ### **Your Task:**  
+        Analyze the provided test cases and offer **constructive suggestions for improvement**, focusing on:  
 
-        Please provide the improved test cases with clear explanations of the changes made.
+        1. **Coverage Gaps:** Identify missing test scenarios, including functional, integration, and regression cases.  
+        2. **Edge Cases & Error Handling:** Recommend additional test cases for boundary conditions, invalid inputs, and failure scenarios.  
+        3. **Clarity & Documentation:** Suggest improvements to test descriptions, assertions, and expected outcomes for better readability.  
+        4. **Test Optimization:** Identify redundant or inefficient test cases and propose refinements to improve execution speed and maintainability.  
+        5. **Framework Best Practices:** Provide recommendations to align with industry best practices for the chosen testing framework.  
+
+        ### **Expected Output:**  
+        Instead of rewriting test cases, provide **detailed recommendations** on:  
+        - **Key areas of improvement** in existing test cases.  
+        - **Missing tests or scenarios** that should be included.  
+        - **Refinements to improve clarity, efficiency, and maintainability**.  
+        - **Best practices for structuring high-quality test cases**.  
+
+        Ensure that your suggestions are **clear, actionable, and aligned with software testing standards**.
         """
 
         fix_test_cases_response = llm.invoke([fix_test_cases_prompt] + state["messages"])
@@ -1080,30 +1083,29 @@ You are a highly skilled **software engineer** specializing in **building scalab
         st.session_state.current_step = "Fix Code After QA Feedback"
         """Fixes code based on QA testing feedback."""
         qa_fix_prompt = f"""
-        You are an expert software engineer tasked with fixing issues identified during QA testing.
+        You are an expert software engineer tasked with reviewing QA feedback and providing improvement suggestions.
 
         **Project Name**: {state["project_name"]}
         **Project Description**: {state["project_description"]}
-
-        **Original Code**:
-        {state["generated_code"]}
 
         **QA Testing Feedback**:
         {state["qa_testing_feedback"]}
 
         **Your Task**:
-        - Address all issues identified during QA testing
-        - Fix functionality that didn't work as expected
-        - Improve error handling for failed test cases
-        - Optimize code where performance issues were noted
-        - Ensure the code passes all test cases
+        - Analyze the QA feedback and identify key issues
+        - Provide specific recommendations for fixing functional defects
+        - Suggest improvements for error handling and exception management
+        - Highlight potential optimizations for performance-related concerns
+        - Ensure recommendations align with best coding practices
+        - Identify any gaps in existing test coverage and suggest additional tests
 
-        Provide the improved code with clear comments explaining the changes made to address the QA feedback.
-        """
+        Your output should contain **detailed suggestions** for each issue reported, ensuring the development team can make precise improvements without ambiguity.
+"""
+
 
         fix_qa_response = llm.invoke([qa_fix_prompt] + state["messages"])
-        st.session_state.generated_code = fix_qa_response.content
-        return {"messages": fix_qa_response.content, "generated_code": fix_qa_response.content}
+        st.session_state.qa_final_feedback = fix_qa_response.content
+        return {"messages": fix_qa_response.content, "qa_final_feedback": fix_qa_response.content}
                 
     
     # Create the graph
@@ -1420,9 +1422,9 @@ def main():
             with tabs[3]:
                 st.header("Fix Code After Code Review")
 
-                if st.session_state.code_feedback:
+                if st.session_state.code_quality_score:
                     with st.expander("Code Review Feedback", expanded=True):
-                        st.info(st.session_state.code_feedback)
+                        st.info(st.session_state.code_quality_score)
                 
                 if st.session_state.generated_code:
                     with st.expander("Fixed Code After Review", expanded=True):
@@ -1439,13 +1441,13 @@ def main():
                 
                 if st.session_state.security_feedback:
                     with st.expander("Security Review Feedback", expanded=True):
-                        st.info(st.session_state.security_feedback)
+                        st.info(st.session_state.security_review_response)
                 
                 if st.session_state.fixed_code_after_security:
                     with st.expander("Fixed Code After Security Review", expanded=True):
-                        st.code(st.session_state.fixed_code_after_security)
+                        st.code(st.session_state.generated_code)
                         create_download_link(
-                            st.session_state.fixed_code_after_security,
+                            st.session_state.generated_code,
                             "fixed_code_after_security.py",
                             "Download Fixed Code"
                         )
@@ -1478,13 +1480,13 @@ def main():
                 
                 if st.session_state.qa_testing_feedback:
                     with st.expander("QA Testing Feedback", expanded=True):
-                        st.info(st.session_state.qa_testing_feedback)
+                        st.info(st.session_state.qa_final_feedback)
                 
-                if st.session_state.fixed_code_after_qa_feedback:
+                if st.session_state.generated_code:
                     with st.expander("Fixed Code After QA Feedback", expanded=True):
-                        st.code(st.session_state.fixed_code_after_qa_feedback)
+                        st.code(st.session_state.generated_code)
                         create_download_link(
-                            st.session_state.fixed_code_after_qa_feedback,
+                            st.session_state.generated_code,
                             "fixed_code_after_qa.py",
                             "Download Fixed Code"
                         )
