@@ -870,9 +870,9 @@ You are a highly skilled **software engineer** specializing in **building scalab
 - **Fully structured implementation-ready code**.
 - Well-organized modules and functions.
 - Code snippets in **appropriate files & folders**.
-- Necessary configurations, environment variables, and setup instructions.
+- Necessary configurations, environment variables, and setup instructions in a README file.
 
-🚀 **Deliver the code in a well-structured format with explanations where necessary.**
+🚀 **Deliver the code in a well-structured format.**
 """
 
         code_response = llm.invoke([code_generation_prompt] + state["messages"])
@@ -1422,9 +1422,11 @@ def main():
             with tabs[3]:
                 st.header("Fix Code After Code Review")
 
-                if st.session_state.code_quality_score:
+                if st.session_state.code_feedback:
                     with st.expander("Code Review Feedback", expanded=True):
-                        st.info(st.session_state.code_quality_score)
+                        print("\n")
+                        print(st.session_state.code_feedback)
+                        st.info(st.session_state.code_feedback)
                 
                 if st.session_state.generated_code:
                     with st.expander("Fixed Code After Review", expanded=True):
@@ -1439,12 +1441,16 @@ def main():
             with tabs[4]:
                 st.header("Fix Code After Security Review")
                 
-                if st.session_state.security_feedback:
+                if st.session_state.security_review_response:
                     with st.expander("Security Review Feedback", expanded=True):
+                        print("\n")
+                        print(st.session_state.security_review_response)
                         st.info(st.session_state.security_review_response)
                 
-                if st.session_state.fixed_code_after_security:
+                if st.session_state.generated_code:
                     with st.expander("Fixed Code After Security Review", expanded=True):
+                        print("\n")
+                        print(st.session_state.generated_code)
                         st.code(st.session_state.generated_code)
                         create_download_link(
                             st.session_state.generated_code,
@@ -1480,6 +1486,7 @@ def main():
                 
                 if st.session_state.qa_testing_feedback:
                     with st.expander("QA Testing Feedback", expanded=True):
+                        print(st.session_state.qa_testing_feedback)
                         st.info(st.session_state.qa_final_feedback)
                 
                 if st.session_state.generated_code:
